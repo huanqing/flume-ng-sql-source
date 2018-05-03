@@ -1,9 +1,9 @@
 package org.keedio.flume.source;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
 import org.hibernate.CacheMode;
 import org.hibernate.Query;
@@ -94,52 +94,43 @@ public class HibernateHelper {
 	 * @throws InterruptedException 
 	 */
 	@SuppressWarnings("unchecked")
-	public List<List<Object>> executeQuery() throws InterruptedException {
-		
-		List<List<Object>> rowsList = new ArrayList<List<Object>>() ;
+	public List<Map<String,Object>> executeQuery(Table table) throws InterruptedException {
+
+		List<Map<String,Object>> rowsList = new ArrayList() ;
+
 		Query query;
 		
 		if (!session.isConnected()){
 			resetConnection();
 		}
-				
-		if (sqlSourceHelper.isCustomQuerySet()){
-			
-			query = session.createSQLQuery(sqlSourceHelper.buildQuery());
-			
-			if (sqlSourceHelper.getMaxRows() != 0){
-				query = query.setMaxResults(sqlSourceHelper.getMaxRows());
-			}			
-		}
-		else
-		{
-			query = session
-					.createSQLQuery(sqlSourceHelper.getQuery())
-					.setFirstResult(Integer.parseInt(sqlSourceHelper.getCurrentIndex()));
-			
-			if (sqlSourceHelper.getMaxRows() != 0){
-				query = query.setMaxResults(sqlSourceHelper.getMaxRows());
+		query = session.createSQLQuery(sqlSourceHelper.buildQuery(table));
+
+		if("date".equalsIgnoreCase(table.getiFieldType())) {
+			SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmssSSS");
+			try {
+				LOG.debug("startFrom:" + table.getStartFrom().toString());
+				query = query.setDate(0, dateFormat.parse(table.getStartFrom().toString()));
+			} catch (ParseException e) {
+				LOG.error("parse error:", e);
 			}
+		}else if("number".equalsIgnoreCase(table.getiFieldType())){
+			query = query.setLong(0, table.getStartFrom());
+		}else {
+			query = query.setString(0, table.getStartFrom().toString());
 		}
-		
+
+		if (sqlSourceHelper.getMaxRows() != 0) {
+			query = query.setMaxResults(sqlSourceHelper.getMaxRows());
+		}
+		//LOG.info("startFrom3:" + table.getStartFrom());
+        //LOG.info("query:" + query.getQueryString());
 		try {
-			rowsList = query.setFetchSize(sqlSourceHelper.getMaxRows()).setResultTransformer(Transformers.TO_LIST).list();
-		}catch (Exception e){
-			LOG.error("Exception thrown, resetting connection.",e);
+			rowsList = query.setFetchSize(sqlSourceHelper.getMaxRows()).setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP).list();
+		} catch (Exception e) {
+			LOG.error("Exception thrown, resetting connection.", e);
 			resetConnection();
 		}
-		
-		if (!rowsList.isEmpty()){
-			if (sqlSourceHelper.isCustomQuerySet()){
-					sqlSourceHelper.setCurrentIndex(rowsList.get(rowsList.size()-1).get(0).toString());
-			}
-			else
-			{
-				sqlSourceHelper.setCurrentIndex(Integer.toString((Integer.parseInt(sqlSourceHelper.getCurrentIndex())
-						+ rowsList.size())));
-			}
-		}
-		
+
 		return rowsList;
 	}
 
