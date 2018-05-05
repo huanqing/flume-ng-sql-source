@@ -33,6 +33,7 @@ public class HibernateHelper {
 	private ServiceRegistry serviceRegistry;
 	private Configuration config;
 	private SQLSourceHelper sqlSourceHelper;
+	private String dbType = "";
 
 	/**
 	 * Constructor to initialize hibernate configuration parameters
@@ -47,6 +48,13 @@ public class HibernateHelper {
 		sqlSourceHelper.checkMandatoryProperties();
 
 		Map<String,String> hibernateProperties = context.getSubProperties("hibernate.");
+		String conUrl = hibernateProperties.get("connection.url");
+		if(conUrl.contains("mysql")) {
+			dbType = "mysql";
+		}else if(conUrl.contains("sqlserver")) {
+			dbType = "sqlserver";
+		}
+
 		Iterator<Map.Entry<String,String>> it = hibernateProperties.entrySet().iterator();
 		
 		config = new Configuration();
@@ -56,6 +64,7 @@ public class HibernateHelper {
 			e = it.next();
 			config.setProperty("hibernate." + e.getKey(), e.getValue());
 		}
+
 
 	}
 
@@ -81,9 +90,13 @@ public class HibernateHelper {
 	public void closeSession() {
 
 		LOG.info("Closing hibernate session");
+        try {
+			session.close();
+			factory.close();
+		}catch (Exception ignore) {
+        	LOG.warn("close error:", ignore);
+		}
 
-		session.close();
-		factory.close();
 	}
 
 	/**
@@ -106,12 +119,17 @@ public class HibernateHelper {
 		query = session.createSQLQuery(sqlSourceHelper.buildQuery(table));
 
 		if("date".equalsIgnoreCase(table.getiFieldType())) {
-			SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmssSSS");
+			SimpleDateFormat dateFormat1 = new SimpleDateFormat("yyyyMMddHHmmss");
+			SimpleDateFormat dateFormat2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 			try {
 				LOG.debug("startFrom:" + table.getStartFrom().toString());
-				query = query.setDate(0, dateFormat.parse(table.getStartFrom().toString()));
-			} catch (ParseException e) {
+				Date sfDate = dateFormat1.parse(table.getStartFrom()+"");
+				String startFromStr = dateFormat2.format(sfDate);
+				LOG.debug("startFromStr:" + startFromStr);
+				query = query.setString(0, startFromStr);
+			} catch (Exception e) {
 				LOG.error("parse error:", e);
+				throw new RuntimeException(e);
 			}
 		}else if("number".equalsIgnoreCase(table.getiFieldType())){
 			query = query.setLong(0, table.getStartFrom());
@@ -135,8 +153,13 @@ public class HibernateHelper {
 	}
 
 	private void resetConnection() throws InterruptedException{
-		session.close();
-		factory.close();
+		try {
+			session.close();
+			factory.close();
+		}catch (Exception ignore){
+			LOG.warn("close error:", ignore);
+		}
+
 		establishSession();
 	}
 }

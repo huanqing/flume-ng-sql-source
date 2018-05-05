@@ -72,7 +72,7 @@ public class SQLSourceHelper {
   private static final String DEFAULT_CHARSET_RESULTSET = "UTF-8";
 
   //private  SimpleDateFormat SDF = new SimpleDateFormat("yyyyMMddHHmmss");
-  private  String dateFormat = "yyyyMMddHHmmssSSS";
+  public static   String dateFormat = "yyyy-MM-dd HH:mm:ss";
   private  String jsonLineEnd = "\n";
 
   /**
@@ -100,7 +100,7 @@ public class SQLSourceHelper {
     connectionPassword = context.getString("hibernate.connection.password");
     readOnlySession = context.getBoolean("read.only", false);
     jsonLineEnd = context.getString("json.line.end", "\n");
-    dateFormat  = context.getString("date.format", "yyyyMMddHHmmssSSS");
+    dateFormat  = context.getString("date.format", dateFormat);
     LOG.info("tables:" + tables);
     LOG.info(context.toString());
     for(String table : tables.split(",")) {
@@ -243,7 +243,8 @@ public class SQLSourceHelper {
           entry.setValue("");
         }
         // format time
-        if (value instanceof java.util.Date){
+        LOG.debug("valueType:" + value.getClass().toString());
+        if (value instanceof  java.sql.Timestamp || value instanceof java.sql.Date || value instanceof java.util.Date){
           entry.setValue(SDF.format(value));
         }
       }
@@ -290,6 +291,7 @@ public class SQLSourceHelper {
    */
   public void updateStatusFile() {
     for(Table table: tableList) {
+      LOG.debug("updateStatusFile:" + table);
       statusFileJsonMap.put(table.getName(), String.valueOf(table.getStartFrom()));
     }
     try {
@@ -302,7 +304,7 @@ public class SQLSourceHelper {
   }
 
   public String buildQuery(Table table) {
-    return String.format("select %s from %s where %s > ? ", table.getFields(), table.getName(), table.getiField());
+    return String.format("select %s from %s where %s > ? order by %s", table.getFields(), table.getName(), table.getiField(), table.getiField());
   }
 
   private void getStatusFileIndex(List<Table> tableList) {
@@ -318,7 +320,9 @@ public class SQLSourceHelper {
         statusFileJsonMap = (Map) jsonParser.parse(fileReader);
         for(Table table : tableList) {
           String startFrom = statusFileJsonMap.get(table.getName());
-          statusFileJsonMap.put(table.getName(), startFrom);
+          LOG.debug("reader from status file startFrom:" + startFrom);
+          table.setStartFrom(startFrom);
+
         }
         checkJsonValues();
 
@@ -525,7 +529,9 @@ class Table {
   }
 
   public void setiField(String iField) {
-    this.iField = iField;
+    if(StringUtils.isNotEmpty(iField)) {
+      this.iField = iField.toUpperCase();
+    }
   }
 
 
@@ -538,10 +544,17 @@ class Table {
   }
 
   public Long getStartFrom() {
-    if(startFrom != null ) {
-      return startFrom;
+    LOG.debug("startFrom1:" + startFrom);
+    if(this.startFrom != null ) {
+      if("date".equalsIgnoreCase(this.getiFieldType()) && startFrom == 0) {
+          this.startFrom = getiFieldDefaultValue();
+      }
+    }else {
+      this.startFrom = getiFieldDefaultValue();
     }
-    return getiFieldDefaultValue();
+
+    LOG.debug("startFrom2:" + startFrom);
+    return this.startFrom;
   }
 
   public void setStartFrom(String startFrom) {
@@ -562,7 +575,7 @@ class Table {
   private Long getiFieldDefaultValue() {
 
     if("date".equalsIgnoreCase(iFieldType)) {
-      SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmssSSS");
+      SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss");
       String currStr = sdf.format(new Date());
       return Long.valueOf(currStr);
     }else if("number".equals(iFieldType)) {
@@ -578,8 +591,8 @@ class Table {
          if(StringUtils.isNotEmpty(startFrom)) {
            startFrom = startFrom.replaceAll("[-:\\s]", "");
            if("date".equalsIgnoreCase(getiFieldType())) {
-             if(startFrom.length() > 17) {
-               startFrom = startFrom.substring(0,17);
+             if(startFrom.length() > 14) {
+               startFrom = startFrom.substring(0,14);
              }
            }
            LOG.debug("change before2:" + startFrom);
