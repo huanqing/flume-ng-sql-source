@@ -5,6 +5,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+import org.apache.commons.lang.time.DateUtils;
 import org.hibernate.CacheMode;
 import org.hibernate.Query;
 import org.hibernate.Session;
@@ -33,7 +34,9 @@ public class HibernateHelper {
 	private ServiceRegistry serviceRegistry;
 	private Configuration config;
 	private SQLSourceHelper sqlSourceHelper;
-	private String dbType = "";
+	public static String dbType = "";
+	public final static String DB_TYPE_MYSQL = "mysql";
+	public final static String DB_TYPE_SQLSERVER = "sqlserver";
 
 	/**
 	 * Constructor to initialize hibernate configuration parameters
@@ -49,10 +52,10 @@ public class HibernateHelper {
 
 		Map<String,String> hibernateProperties = context.getSubProperties("hibernate.");
 		String conUrl = hibernateProperties.get("connection.url");
-		if(conUrl.contains("mysql")) {
-			dbType = "mysql";
-		}else if(conUrl.contains("sqlserver")) {
-			dbType = "sqlserver";
+		if(conUrl.contains(DB_TYPE_MYSQL)) {
+			dbType = DB_TYPE_MYSQL;
+		}else if(conUrl.contains(DB_TYPE_SQLSERVER)) {
+			dbType = DB_TYPE_SQLSERVER;
 		}
 
 		Iterator<Map.Entry<String,String>> it = hibernateProperties.entrySet().iterator();
@@ -124,6 +127,12 @@ public class HibernateHelper {
 			try {
 				LOG.debug("startFrom:" + table.getStartFrom().toString());
 				Date sfDate = dateFormat1.parse(table.getStartFrom()+"");
+				Integer pre = table.getPre();
+
+				if(pre != null && table.getPre() > 0) {
+					LOG.debug("pre:" + pre);
+					sfDate = DateUtils.addSeconds(sfDate, -table.getPre());
+				}
 				String startFromStr = dateFormat2.format(sfDate);
 				LOG.debug("startFromStr:" + startFromStr);
 				query = query.setString(0, startFromStr);

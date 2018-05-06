@@ -10,8 +10,10 @@ import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.hibernate.cfg.Configuration;
+import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
@@ -116,6 +118,11 @@ public class SQLSourceHelper {
       t.setStaticValues(context.getString(table + ".staticvalues"));
       t.setFields(context.getString(table + ".fields"));
       t.setFieldsShow(context.getString(table + ".fieldsshow"));
+      t.setMergeByField(context.getString(table + ".mergebyfield"));
+      t.setMergeFields(context.getString(table + ".mergefields"));
+      t.setMergeKey(context.getString(table + ".mergekey"));
+      t.setPre(context.getInteger(table + ".pre", 0));
+
 
       tableList.add(t);
     }
@@ -162,6 +169,7 @@ public class SQLSourceHelper {
    */
   public List<Map<String,Object>> getAllRows(List<Map<String,Object>> queryResult, Table table) {
 
+
   /*  List<String[]> allRows = new ArrayList<String[]>();
 
     if (queryResult == null || queryResult.isEmpty()) {
@@ -203,6 +211,49 @@ public class SQLSourceHelper {
 
     return queryResult;
   }
+  public List<Map<String,Object>> merge(List<Map<String, Object>> queryResult, Table table) {
+    //merge
+    String mergeByField = table.getMergeByField();
+
+    if(StringUtils.isNotEmpty(mergeByField)&& queryResult != null && queryResult.size() > 0) {
+      List<String> mergeFields = Arrays.asList(table.getMergeFields().split(","));
+      String mergeKey = table.getMergeKey();
+      Map<Object,Map<String, Object>> mergedMap = new HashMap<>();
+      for (Map<String,Object> item :queryResult) {
+        Object mergeValue = item.get(mergeByField);
+        Map<String, Object> merge = mergedMap.get(mergeValue);
+        if(merge != null) {
+          List<Map<String, Object>> mergeField = (List<Map<String, Object>>)merge.get(mergeKey);
+          Map<String, Object> itemMerge = new HashMap<>();
+          for(String mf: mergeFields) {
+            itemMerge.put(mf, item.get(mf));
+          }
+          mergeField.add(itemMerge);
+        }else {
+          List<Map<String, Object>> mergeField = new LinkedList<>();
+
+          Map<String, Object> itemMerge = new HashMap<>();
+          for(String mf: mergeFields) {
+            itemMerge.put(mf, item.get(mf));
+          }
+          mergeField.add(itemMerge);
+          Map<String,Object>  row = new HashMap<>();
+          for (Map.Entry<String,Object> entry:item.entrySet()) {
+            if(!mergeFields.contains(entry.getKey())) {
+              row.put(entry.getKey(), entry.getValue());
+            }
+          }
+          row.put(mergeKey, mergeField);
+          mergedMap.put(mergeValue, row);
+        }
+      }
+      List<Map<String, Object>> mergedList = new LinkedList<>();
+      mergedList.addAll(mergedMap.values());
+      return mergedList;
+
+    }
+    return queryResult;
+  }
   public String[] addStatic(String[] row, List<String> add) {
     int addSize = add.size();
     if(addSize > 0) {
@@ -241,13 +292,24 @@ public class SQLSourceHelper {
         // initialize null field
         if (value == null){
           entry.setValue("");
-        }
-        // format time
-        LOG.debug("valueType:" + value.getClass().toString());
-        if (value instanceof  java.sql.Timestamp || value instanceof java.sql.Date || value instanceof java.util.Date){
-          entry.setValue(SDF.format(value));
+        }else {
+          // format time
+          LOG.debug("valueType:" + value.getClass().toString());
+          if (value instanceof java.sql.Timestamp || value instanceof java.sql.Date || value instanceof java.util.Date) {
+            entry.setValue(SDF.format(value));
+          }
         }
       }
+
+      List<Map.Entry<String, Object>> entrySetClone = new LinkedList<>();
+      entrySetClone.addAll(item.entrySet());
+      for (Map.Entry<String,Object> entry:entrySetClone) {
+        String key = entry.getKey();
+        Object value = entry.getValue();
+        item.remove(key);
+        item.put(key.toUpperCase(), value);
+      }
+
       Object iFieldRaw = item.get(table.getiField());
       if(iFieldRaw != null) {
         String iField = iFieldRaw.toString();
@@ -256,16 +318,22 @@ public class SQLSourceHelper {
         }
       }
 
-
       Map<String, String> staticFieldsMap = table.getStaticFieldsMap();
       if(staticFieldsMap != null && staticFieldsMap.size() > 0) {
         item.putAll(staticFieldsMap);
       }
+
+      item.put(SQLSource.EXT_SYS_TIME_KEY, SDF.format(new Date()));
+
+    }
+    queryResult = merge(queryResult, table);
+    for (Map<String,Object> item :queryResult) {
       String json = gson.toJson(item, type);
       // write to output stream
       LOG.debug("row json:" + json);
       printWriter.print(json+jsonLineEnd);
     }
+
   }
 
   /**
@@ -291,7 +359,7 @@ public class SQLSourceHelper {
    */
   public void updateStatusFile() {
     for(Table table: tableList) {
-      LOG.debug("updateStatusFile:" + table);
+      LOG.debug("updateStatusFile:" + table.getName() + ":" + table.getStartFrom());
       statusFileJsonMap.put(table.getName(), String.valueOf(table.getStartFrom()));
     }
     try {
@@ -304,7 +372,12 @@ public class SQLSourceHelper {
   }
 
   public String buildQuery(Table table) {
-    return String.format("select %s from %s where %s > ? order by %s", table.getFields(), table.getName(), table.getiField(), table.getiField());
+    return String.format("select %s,'%s' as \"%s\",%s as \"%s\" from %s where %s > ? order by %s",
+            table.getFields(), table.getName(),SQLSource.EXT_TABLE_KEY,
+            table.getCurrentDBTimeFun(), SQLSource.EXT_DB_TIME_KEY,
+            table.getName(),
+            table.getiField(), table.getiField()
+    );
   }
 
   private void getStatusFileIndex(List<Table> tableList) {
@@ -441,6 +514,52 @@ class Table {
   private List<String> staticFields = new LinkedList<>();
   private List<String> staticValues = new LinkedList<>();
   private Map<String, String> staticFieldsMap = null;
+  private String mergeKey;
+  private String mergeByField;
+  private String mergeFields;
+  private Integer pre;
+
+  public Integer getPre() {
+    return pre;
+  }
+
+  public void setPre(Integer pre) {
+    this.pre = pre;
+  }
+
+  public String getMergeKey() {
+    return mergeKey;
+  }
+
+  public void setMergeKey(String mergeKey) {
+    if(StringUtils.isNotEmpty(mergeKey)) {
+      this.mergeKey = mergeKey.toUpperCase();
+    }
+
+  }
+
+  public String getMergeByField() {
+    return mergeByField;
+  }
+
+  public void setMergeByField(String mergeByField) {
+    if(StringUtils.isNotEmpty(mergeByField)) {
+      this.mergeByField = mergeByField.toUpperCase();
+    }
+
+  }
+
+  public String getMergeFields() {
+    return mergeFields;
+  }
+
+  public void setMergeFields(String mergeFields) {
+    if(StringUtils.isNotEmpty(mergeFields)) {
+      this.mergeFields = mergeFields.toUpperCase();
+    }
+
+  }
+
   public void setFields(String fields) {
     this.fields = fields;
   }
@@ -463,6 +582,12 @@ class Table {
     return staticFieldsMap;
   }
 
+  public String getCurrentDBTimeFun() {
+    if(HibernateHelper.DB_TYPE_MYSQL.equalsIgnoreCase(HibernateHelper.dbType)) {
+      return " NOW() ";
+    }
+    return " GETDATE() ";
+  }
   public String getFields() {
     if(StringUtils.isEmpty(fields)) {
       return "*";
@@ -572,6 +697,8 @@ class Table {
     this.iFieldIndex = Integer.valueOf(iFieldIndex);
   }
 
+
+
   private Long getiFieldDefaultValue() {
 
     if("date".equalsIgnoreCase(iFieldType)) {
@@ -603,4 +730,6 @@ class Table {
 
          return this.startFrom;
   }
+
+
 }

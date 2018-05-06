@@ -61,6 +61,10 @@ public class SQLSource extends AbstractSource implements Configurable, PollableS
     }
 
     private static final Logger LOG = LoggerFactory.getLogger(SQLSource.class);
+    public static final String EXT_DB_TIME_KEY = "_CQSJKSJ";//抽取数据库时间
+    public static final String EXT_SYS_TIME_KEY = "_CQXTSJ";//抽取系统时间
+    public static final String EXT_TABLE_KEY = "_CQBMC"; //抽取表名称
+
     protected SQLSourceHelper sqlSourceHelper;
     private SqlSourceCounter sqlSourceCounter;
     //private CSVWriter csvWriter;
