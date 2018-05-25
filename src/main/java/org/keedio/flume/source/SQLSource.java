@@ -106,29 +106,25 @@ public class SQLSource extends AbstractSource implements Configurable, PollableS
         try {
 		    for (Table table: sqlSourceHelper.tableList) {
                 sqlSourceCounter.startProcess();
-                List<Map<String,Object>> result = hibernateHelper.executeQuery(table);
+                List<Map<String,Object>> result = hibernateHelper.executeQuery(table, 5);
                 if (!result.isEmpty()) {
-                    //csvWriter.writeAll(sqlSourceHelper.getAllRows(result, table), sqlSourceHelper.encloseByQuotes());
-                    //csvWriter.flush();
                     sqlSourceHelper.writeAllRows(sqlSourceHelper.getAllRows(result, table), printWriter, table);
                     printWriter.flush();
                     sqlSourceCounter.incrementEventCount(result.size());
-
                 }
                 sqlSourceHelper.updateStatusFile();
                 sqlSourceCounter.endProcess(result.size());
                 canSleep = canSleep || result.size() < sqlSourceHelper.getMaxRows();
             }
-
             if (canSleep) {
                 Thread.sleep(sqlSourceHelper.getRunQueryDelay());
             }
-			return Status.READY;
-			
 		} catch (Exception e) {
-			LOG.error("Error procesing row", e);
-			return Status.BACKOFF;
-		}
+			LOG.warn("Error procesing row", e);
+		}finally {
+            hibernateHelper.closeSession();
+        }
+        return Status.READY;
 	}
  
 	/**

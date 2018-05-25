@@ -96,7 +96,7 @@ public class HibernateHelper {
         try {
 			session.close();
 			factory.close();
-		}catch (Exception ignore) {
+		}catch (Throwable ignore) {
         	LOG.warn("close error:", ignore);
 		}
 
@@ -109,53 +109,57 @@ public class HibernateHelper {
 	 * keep in mind in case of future conversions/castings.
 	 * @throws InterruptedException 
 	 */
+
 	@SuppressWarnings("unchecked")
-	public List<Map<String,Object>> executeQuery(Table table) throws InterruptedException {
+	public List<Map<String,Object>> executeQuery(Table table, int retry) throws InterruptedException {
 
 		List<Map<String,Object>> rowsList = new ArrayList() ;
-
-		Query query;
-		
-		if (!session.isConnected()){
-			resetConnection();
-		}
-		query = session.createSQLQuery(sqlSourceHelper.buildQuery(table));
-
-		if("date".equalsIgnoreCase(table.getiFieldType())) {
-			SimpleDateFormat dateFormat1 = new SimpleDateFormat("yyyyMMddHHmmss");
-			SimpleDateFormat dateFormat2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-			try {
-				LOG.debug("startFrom:" + table.getStartFrom().toString());
-				Date sfDate = dateFormat1.parse(table.getStartFrom()+"");
-				Integer pre = table.getPre();
-
-				if(pre != null && table.getPre() > 0) {
-					LOG.debug("pre:" + pre);
-					sfDate = DateUtils.addSeconds(sfDate, -table.getPre());
-				}
-				String startFromStr = dateFormat2.format(sfDate);
-				LOG.debug("startFromStr:" + startFromStr);
-				query = query.setString(0, startFromStr);
-			} catch (Exception e) {
-				LOG.error("parse error:", e);
-				throw new RuntimeException(e);
-			}
-		}else if("number".equalsIgnoreCase(table.getiFieldType())){
-			query = query.setLong(0, table.getStartFrom());
-		}else {
-			query = query.setString(0, table.getStartFrom().toString());
-		}
-
-		if (sqlSourceHelper.getMaxRows() != 0) {
-			query = query.setMaxResults(sqlSourceHelper.getMaxRows());
-		}
-		//LOG.info("startFrom3:" + table.getStartFrom());
-        //LOG.info("query:" + query.getQueryString());
 		try {
+			Query query;
+
+			if (!session.isOpen()||!session.isConnected()){
+				resetConnection();
+			}
+			query = session.createSQLQuery(sqlSourceHelper.buildQuery(table));
+
+			if("date".equalsIgnoreCase(table.getiFieldType())) {
+				SimpleDateFormat dateFormat1 = new SimpleDateFormat("yyyyMMddHHmmss");
+				SimpleDateFormat dateFormat2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+				try {
+					LOG.debug("startFrom:" + table.getStartFrom().toString());
+					Date sfDate = dateFormat1.parse(table.getStartFrom()+"");
+					Integer pre = table.getPre();
+
+					if(pre != null && table.getPre() > 0) {
+						LOG.debug("pre:" + pre);
+						sfDate = DateUtils.addSeconds(sfDate, -table.getPre());
+					}
+					String startFromStr = dateFormat2.format(sfDate);
+					LOG.debug("startFromStr:" + startFromStr);
+					query = query.setString(0, startFromStr);
+				} catch (Exception e) {
+					LOG.error("parse error:", e);
+					throw new RuntimeException(e);
+				}
+			}else if("number".equalsIgnoreCase(table.getiFieldType())){
+				query = query.setLong(0, table.getStartFrom());
+			}else {
+				query = query.setString(0, table.getStartFrom().toString());
+			}
+
+			if (sqlSourceHelper.getMaxRows() != 0) {
+				query = query.setMaxResults(sqlSourceHelper.getMaxRows());
+			}
+			//LOG.info("startFrom3:" + table.getStartFrom());
+			//LOG.info("query:" + query.getQueryString());
 			rowsList = query.setFetchSize(sqlSourceHelper.getMaxRows()).setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP).list();
 		} catch (Exception e) {
-			LOG.error("Exception thrown, resetting connection.", e);
-			resetConnection();
+			LOG.error("executeQuery Exception thrown, resetting connection.", e);
+			if(retry > 0) {
+				LOG.warn("retry:" + retry);
+				retry = retry - 1;
+				executeQuery(table, retry);
+			}
 		}
 
 		return rowsList;
@@ -167,8 +171,10 @@ public class HibernateHelper {
 			factory.close();
 		}catch (Exception ignore){
 			LOG.warn("close error:", ignore);
+		}finally {
+			establishSession();
 		}
 
-		establishSession();
+
 	}
 }
